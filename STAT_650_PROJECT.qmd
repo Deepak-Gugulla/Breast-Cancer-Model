@@ -1,0 +1,309 @@
+---
+title: "STAT_650_PROJECT"
+author: "VAMSHI REDDY MADEM, DEEPAK GUGULLA, MRUDULA NIMMALA"
+editor: visual
+format: 
+    html: 
+      self-contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(psych)
+library(vip)
+library(dplyr)
+library(tidymodels)
+library(Stat2Data)
+library(MASS)
+library(car)
+library(ggplot2)
+library(ggExtra)
+library(car)
+library(carData)
+library(emmeans)
+library(dplyr)
+library(rsample)
+library(purrr)
+library(caret)
+library(psych)
+library(vip)
+library(dplyr)
+library(pROC)
+library(discrim)
+```
+
+```{r}
+gbsg <- read.csv("~/Documents/Ms-Stats/Fall-2024/Stat-650/Project/Breast-Cancer-Model/gbsg.csv")
+```
+
+```{r}
+#looking at data
+str(gbsg)
+head(gbsg)
+summary(gbsg)
+```
+
+```{r}
+#summary statistics
+summary_stats <- summary(gbsg)
+print(summary_stats)
+```
+
+```{r}
+#Data cleaning
+#getting rid of na values if there are any.
+gbsg_clean <- na.omit(gbsg)
+
+
+#Removing pid because it is just random tag number
+gbsg_clean <- gbsg[, !names(gbsg) %in% c("pid")]
+
+# Now apply factor conversion with correct labels
+gbsg_clean <- gbsg_clean %>% 
+  mutate(
+    pgr = factor(pgr),
+    nodes = factor(nodes),
+    hormon = factor(hormon, labels = c('No', 'Yes')),
+    status = factor(status, labels = c('No', 'Yes')),
+    meno = factor(meno, labels = c('No', 'Yes'))
+  )
+
+gbsg_clean <- gbsg_clean %>% 
+  mutate(status = ifelse(status == "No",0,1),
+         status = as.factor(status))
+
+
+#removing outliers
+glm1 <- glm(status ~ . ,family = binomial, data=gbsg_clean)
+ind <- which(abs(rstandard(glm1)) > 2)
+gbsg_clean[ind, ]
+gbsg_clean <- gbsg_clean[-ind, ]
+```
+
+```{r}
+set.seed(4172)
+gbsg_split <- initial_split(gbsg_clean, prop = 0.75)
+cv_train <- training(gbsg_split)
+cv_testing <- testing(gbsg_split)
+```
+
+```{r}
+#intitial model
+glm2 <- glm(status ~ .,family = binomial, data=cv_train)
+glm2
+```
+
+```{r}
+model <- stepAIC(glm2)
+summary(model)
+```
+
+```{r}
+#confusion matrix
+probs_test <- predict(model, newdata = cv_testing, type = "response")
+length(probs_test)
+preds_test <- rep(0, length(probs_test))
+preds_test[probs_test > 0.5] <- 1
+tb <- table(prediction = preds_test, actual = cv_testing$status)
+addmargins(tb)
+
+(tb[1,1] + tb[2,2]) / 165
+
+tb[2,2] / 75
+
+tb[1,1] / 87
+
+```
+
+```{r}
+summary(model)
+```
+
+```{r}
+roc_obj <- roc(cv_testing$status, probs_test)
+par(mar=c(4, 4, 2, 2))
+plot(1 - roc_obj$specificities, roc_obj$sensitivities, type="l",
+     xlab = "1 - Specificity", ylab = "Sensitivity")
+# using 0.5 threshold
+abline(0, 1, lty=2)
+auc(roc_obj)
+```
+
+```{r}
+library(purrr)
+#summary statistics
+gbsg %>%                            
+  split(.$status) %>%
+  map(summary)
+gbsg %>% 
+  group_by(status) %>% 
+  summarise_if(is.numeric, list(sd=sd))
+```
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(reshape2)  # For melt function
+
+# Convert 'status' column to factor for better visualization
+gbsg$status <- factor(gbsg$status, labels = c("Alive without recurrence", "Recurrence or death"))
+
+# Select numeric and categorical variables for analysis
+numeric_vars <- c( "size", "rfstime")
+categorical_vars <- c( "hormon", "meno")
+
+# Plot histograms of continuous variables by status
+hist_plots <- lapply(numeric_vars, function(var) {
+  ggplot(gbsg, aes_string(x = var, fill = "status")) +
+    geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+    facet_wrap(~status, scales = "free") +
+    labs(title = paste("Distribution of", var, "by Status"), x = var, y = "Count") +
+    theme_minimal() +
+    theme(legend.position = "top")
+})
+
+# Print each histogram plot
+for (plot in hist_plots) {
+  print(plot)
+}
+
+# Plot box plots of continuous variables by status
+box_plots <- lapply(numeric_vars, function(var) {
+  ggplot(gbsg, aes(x = status, y = !!sym(var))) +
+    geom_boxplot(fill = "skyblue", alpha = 0.7) +
+    labs(title = paste(var, "by Status"), x = "Status", y = var) +
+    theme_minimal()
+})
+
+# Print each box plot
+for (plot in box_plots) {
+  print(plot)
+}
+
+# Plot bar plots of categorical variables by status
+bar_plots <- lapply(categorical_vars, function(var) {
+  ggplot(gbsg, aes_string(x = var, fill = "status")) +
+    geom_bar(position = "dodge", alpha = 0.7) +
+    labs(title = paste(var, "by Status"), x = var, y = "Count") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+})
+
+# Print each bar plot
+for (plot in bar_plots) {
+  print(plot)
+}
+
+# Plot correlation heatmap
+correlation_matrix <- cor(gbsg[numeric_vars])
+correlation_melted <- melt(correlation_matrix)
+
+ggplot(data = correlation_melted, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red",
+                       midpoint = 0, limits = c(-1, 1),
+                       name = "Correlation") +
+  labs(title = "Correlation Heatmap of Numeric Variables") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# Pairplot for selected predictors
+selected_vars <- c("age", "size", "nodes", "pgr", "er", "status")
+pairs(gbsg[selected_vars], 
+      pch = 21, bg = c("red", "blue")[as.numeric(gbsg$status)],
+      main = "Pairplot of Selected Predictors by Status")
+
+ggplot(gbsg, aes(x = size, y = status, color = factor(status))) +
+  geom_point() +
+  labs(x = "Size", y = "meno", color = "Status") +
+  theme_minimal()
+
+
+
+# Create stacked bar plot
+ggplot(gbsg, aes(x = hormon, y = size, fill = factor(status))) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ status) +
+  labs(x = "harmon", y = "size", fill = "status") +
+  theme_minimal()
+
+# Obtain model summary
+summary_glm <- summary(model)
+
+# Extract coefficients and p-values
+coefficients <- coef(summary_glm)
+p_values <- summary_glm$coefficients[, "Pr(>|z|)"]
+
+# Create a data frame for plotting
+importance_data <- data.frame(variable = rownames(coefficients), p_value = p_values)
+
+
+
+# Plot importance bar graph
+library(ggplot2)
+ggplot(importance_data, aes(x = reorder(variable, p_value), y = -log10(p_value))) +
+  geom_bar(stat = "identity", fill = "grey", width = 0.5) +
+  labs(x = "Variable", y = "-log10(P-value)", title = "Variable Importance in GLM Model") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+```{r}
+#Null model 
+Null <- null_model() %>%
+  set_engine("parsnip") %>%
+  set_mode("classification") %>% 
+  fit(status ~ age+meno+size+grade+nodes+pgr+er+hormon+rfstime, data=cv_train)
+
+#C5.0
+C50 <- boost_tree(trees = 20) %>% 
+  set_engine("C5.0") %>%
+  set_mode("classification") %>%
+  fit(status ~ age+meno+size+grade+nodes+pgr+er+hormon+rfstime, data=cv_train)
+
+#Random Forest
+Random_Forest <- rand_forest(trees = 100) %>% 
+  set_engine("ranger") %>%
+  set_mode("classification") %>%
+  fit(status ~ age+meno+size+grade+nodes+pgr+er+hormon+rfstime, data=cv_train)
+#GLM
+GLM <- logistic_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  set_mode("classification") %>%
+  fit(status ~ age+meno+size+grade+nodes+pgr+er+hormon+rfstime, data=cv_train)
+#Naive Bayes
+Naive_Bayes <- naive_Bayes(Laplace = 1) %>% 
+  set_engine("klaR") %>%
+  set_mode("classification") %>%
+  fit(status ~ age+meno+size+grade+nodes+pgr+er+hormon+rfstime, data=cv_train)
+```
+
+```{r}
+library(tidymodels)
+rocobj1 <- Null %>%
+  predict(cv_testing,  type = "prob") %>%
+  bind_cols(cv_testing) %>%
+  roc(status, .pred_0)
+rocobj3 <- C50 %>%
+  predict(cv_testing, type = "prob") %>%
+  bind_cols(cv_testing) %>%
+  roc(status, .pred_0)
+rocobj5 <- Random_Forest %>%
+  predict(cv_testing, type = "prob") %>%
+  bind_cols(cv_testing) %>%
+  roc(status, .pred_0)
+rocobj6 <- GLM %>%
+  predict(cv_testing, type = "prob") %>%
+  bind_cols(cv_testing) %>%
+  roc(status, .pred_0)
+rocobj7 <- Naive_Bayes %>%
+  predict(cv_testing, type = "prob") %>%
+  bind_cols(cv_testing) %>%
+  roc(status, .pred_0) 
+ggroc(list(Null = rocobj1, C50 = rocobj3, Random_forest = rocobj5,
+           GLM = rocobj6, Naive_Bayes = rocobj7))+labs(y="1 - Specificity")
+```
