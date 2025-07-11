@@ -42,7 +42,7 @@ The analysis focuses on predicting the outcome status (alive without recurrence 
   - Accuracy: 68%
   - Sensitivity: 62%
   - Specificity: 74%
-  - Area Under the Curve (AUC): 0.79
+  - Area Under the Curve : 0.79
 
 ## Conclusions
 
